@@ -32,7 +32,7 @@ def decode_ccir1(file):
     audio = bandpass(audio, fs)
 
     peaks = detect_tones(audio, fs)
-    tone_len = int(fs * 0.07)  # circa 100 ms (accettato anche se non perfetto)
+    tone_len = int(fs * 0.07)  # circa 70 ms 
 
     digits = ""
 
@@ -52,5 +52,5 @@ def decode_ccir1(file):
     return digits
 
 if __name__ == "__main__":
-    decoded = decode_ccir1("../selettive_audio/00259.wav")
+    decoded = decode_ccir1("./selettive_audio/00532.wav")
     print("Codice:", decoded)

@@ -242,14 +242,22 @@ def decode_ccir(file,
     # restituisce anche le informazioni per frame per debugging
     return final_string, final_frames
 
-def split_hex(hex_string, group_size=5):
-    # Rimuove eventuali spazi o newline
-    hex_string = hex_string.strip().replace(" ", "").upper()
+def split_hex(hex_string, group_size=5): 
+    
+    #Divide una stringa in gruppi di ma prima taglia la stessa dopo il pattern desiderato se presente
+
+    hex_string = hex_string.upper()
+    pattern = "4E4E"
+
+    # Taglia tutto dopo il pattern incluso
+    idx = hex_string.find(pattern)
+    if idx != -1:
+        hex_string = hex_string[:idx + len(pattern)]
 
     # Divide in gruppi di lunghezza fissa
     groups = [hex_string[i:i+group_size] for i in range(0, len(hex_string), group_size)]
 
-    # Forma il formato richiesto
+    # Crea formato richiesto
     return "-".join(f"({g})" for g in groups)
 
 
@@ -260,8 +268,8 @@ def split_hex(hex_string, group_size=5):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Decoder CCIR-7 robusto")
-    parser.add_argument("file", nargs="?", default="./selettive_audio/00532.wav",
-                        help="Percorso al file .wav (default: ./selettive_audio/00532.wav)")
+    parser.add_argument("file", nargs="?", default="./selettive_audio/23533.wav",
+                        help="Percorso al file .wav (default: ./selettive_audio/23533.wav)")
     parser.add_argument("--tone-ms", type=float, default=100.0, help="Lunghezza frame in ms")
     parser.add_argument("--overlap", type=float, default=0.5, help="Frazione overlap (0..0.9)")
     parser.add_argument("--plot", action="store_true", help="Mostra grafici diagnostici")

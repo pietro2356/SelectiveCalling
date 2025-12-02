@@ -1,5 +1,6 @@
 import numpy as np
 import soundfile as sf
+from scipy.io import wavfile
 import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt
 
@@ -46,31 +47,44 @@ def goertzel_band(samples, center_freq, fs, band=10):
 # -------------------------------
 #  Decodifica CCIR con Goertzel
 # -------------------------------
-def decode_ccir_goertzel(file, tone_ms=100):
-    audio, fs = sf.read(file)
+def decode_ccir_goertzel(fileName, tone_ms=100):
+    fs, data = wavfile.read(fileName)
+    if data.ndim > 1:
+        data = data[:, 0]
+    data = data.astype(np.float32)
+    data /= np.max(np.abs(data))
 
-    # stereo → mono
-    if audio.ndim > 1:
-        audio = audio.mean(axis=1)
+    tone_len = int((tone_ms/1000) * fs)
 
-    tone_len = int(fs * (tone_ms / 1000))
     result = ""
+    print("Lunghezza dati:", len(data), "Campioni. Tono lunghezza:", tone_len, "Campioni")
+    for pos in range(0, len(data) - tone_len, tone_len):
+        segment = data[pos:pos + tone_len]
+        print(segment)
 
-    for pos in range(0, len(audio) - tone_len, tone_len):
-        segment = audio[pos:pos + tone_len]
+        # # calcola l’energia Goertzel Band per ogni frequenza CCIR
+        # magnitudes = [goertzel_band(segment, f, fs, band=10) for f in CCIR7_VALUES]
+        #
+        # # prendi la frequenza più intensa
+        # idx = np.argmax(magnitudes) # ?????
+        # best_freq = magnitudes[idx] # ?????
 
-        # calcola l’energia Goertzel Band per ogni frequenza CCIR
-        magnitudes = [goertzel_band(segment, f, fs, band=10) for f in CCIR7_VALUES]
+        powers = [goertzel_band(segment, f, fs, band=10) for f in CCIR7_VALUES]
+        max_idx = np.argmax(powers)
+        max_val = powers[max_idx]
 
-        # prendi la frequenza più intensa
-        idx = np.argmax(magnitudes) # ?????
-        best_freq = magnitudes[idx] # ?????
+        print("Frequenza dominante:", CCIR7_SYMBOLS[max_idx], "Potenza:", max_val)
 
+        # Filtro anti-rumore: se potenza sotto soglia, consideriamo "vuoto"
+        if max_val < 10000:
+            result += "-"
+        result += CCIR7_SYMBOLS[max_idx]
 
-        if best_freq < 1000: # soglia di rumore. Se sotto, considera vuoto
-            result += "-" # FIXME: Per debug stampiamo un trattino. In prod non stamperemo nulla
-        else:
-            result += CCIR7_SYMBOLS[idx]
+        #
+        # if best_freq < 1000: # soglia di rumore. Se sotto, considera vuoto
+        #     result += "-" # FIXME: Per debug stampiamo un trattino. In prod non stamperemo nulla
+        # else:
+        #     result += CCIR7_SYMBOLS[idx]
 
         # if max(magnitudes.values()) > 12000:
         #     # prendi la frequenza più intensa

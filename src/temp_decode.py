@@ -247,18 +247,29 @@ def split_hex(hex_string, group_size=5):
     #Divide una stringa in gruppi di ma prima taglia la stessa dopo il pattern desiderato se presente
 
     hex_string = hex_string.upper()
+    
     pattern = "4E4E"
 
-    # Taglia tutto dopo il pattern incluso
+    # Taglia tutto dopo il pattern 
     idx = hex_string.find(pattern)
     if idx != -1:
-        hex_string = hex_string[:idx + len(pattern)]
+        hex_string = hex_string[:idx + len(pattern)] #se c'e' pattern taglia
 
-    # Divide in gruppi di lunghezza fissa
-    groups = [hex_string[i:i+group_size] for i in range(0, len(hex_string), group_size)]
+    hex_list = list(hex_string)  # converto in lista per modifiche
 
-    # Crea formato richiesto
-    return "-".join(f"({g})" for g in groups)
+    for i in range(1, len(hex_list)):
+        if hex_list[i] == 'E':
+            hex_list[i] = hex_list[i-1] 
+
+    
+    # Divide in gruppi
+    groups = [hex_list[i:i+group_size] for i in range(0, len(hex_list), group_size)]
+
+    # Trasforma ogni sottolista in stringa e formatta con parentesi tonde
+    groups_str = ["(" + "".join(g) + ")" for g in groups]
+
+    # Unisce con trattino
+    return "-".join(groups_str)
 
 
 # -------------------------------
@@ -268,8 +279,8 @@ def split_hex(hex_string, group_size=5):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Decoder CCIR-7 robusto")
-    parser.add_argument("file", nargs="?", default="./selettive_audio/23533.wav",
-                        help="Percorso al file .wav (default: ./selettive_audio/23533.wav)")
+    parser.add_argument("file", nargs="?", default="./selettive_audio/00532.wav",
+                        help="Percorso al file .wav (default: ./selettive_audio/00532.wav)")
     parser.add_argument("--tone-ms", type=float, default=100.0, help="Lunghezza frame in ms")
     parser.add_argument("--overlap", type=float, default=0.5, help="Frazione overlap (0..0.9)")
     parser.add_argument("--plot", action="store_true", help="Mostra grafici diagnostici")

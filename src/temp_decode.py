@@ -256,25 +256,25 @@ def split_hex(hex_string, group_size=5):
 # -------------------------------
 #  ESEMPIO DI USO DA CLI
 # -------------------------------
+
 if __name__ == "__main__":
-    if __name__ == "__main__":
-        import argparse
-        parser = argparse.ArgumentParser(description="Decoder CCIR-7 robusto")
-        parser.add_argument("file", nargs="?", default="./selettive_audio/00532.wav",
-                            help="Percorso al file .wav (default: ./selettive_audio/00532.wav)")
-        parser.add_argument("--tone-ms", type=float, default=100.0, help="Lunghezza frame in ms")
-        parser.add_argument("--overlap", type=float, default=0.5, help="Frazione overlap (0..0.9)")
-        parser.add_argument("--plot", action="store_true", help="Mostra grafici diagnostici")
-        parser.add_argument("--debug", action="store_true", help="Stampa debug")
-        parser.add_argument("--noise-factor", type=float, default=5.0, help="Fattore per soglia adattiva")
-        args = parser.parse_args()
+    import argparse
+    parser = argparse.ArgumentParser(description="Decoder CCIR-7 robusto")
+    parser.add_argument("file", nargs="?", default="./selettive_audio/00532.wav",
+                        help="Percorso al file .wav (default: ./selettive_audio/00532.wav)")
+    parser.add_argument("--tone-ms", type=float, default=100.0, help="Lunghezza frame in ms")
+    parser.add_argument("--overlap", type=float, default=0.5, help="Frazione overlap (0..0.9)")
+    parser.add_argument("--plot", action="store_true", help="Mostra grafici diagnostici")
+    parser.add_argument("--debug", action="store_true", help="Stampa debug")
+    parser.add_argument("--noise-factor", type=float, default=5.0, help="Fattore per soglia adattiva")
+    args = parser.parse_args()
 
-        decoded, frames = decode_ccir(args.file,
-                                    tone_ms=args.tone_ms,
-                                    overlap=args.overlap,
-                                    noise_factor=args.noise_factor,
-                                    debug=args.debug,
-                                    plot=args.plot)
+    decoded, frames = decode_ccir(args.file,
+                                tone_ms=args.tone_ms,
+                                overlap=args.overlap,
+                                noise_factor=args.noise_factor,
+                                debug=args.debug,
+                                plot=args.plot)
 
-        # print("Decoded:", decoded)
-        print("Decoded:", split_hex(decoded))
+    # print("Decoded:", decoded)
+    print("Decoded:", split_hex(decoded))

@@ -88,6 +88,6 @@ def decode_ccir_goertzel(file, tone_ms=100):
 # -------------------------------
 if __name__ == "__main__":
     print("Decodifica selettiva CCIR-7 con Goertzel")
-    file = "../selettive_audio/00532.wav"
+    file = "./selettive_audio/00532.wav"
     code = decode_ccir_goertzel(file)
     print("Decodifica:", code)

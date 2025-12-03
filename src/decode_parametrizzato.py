@@ -2,66 +2,22 @@ import numpy as np
 import soundfile as sf
 import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt
+import argparse
 
-
-# ==========================
-#  DEFINIZIONI CCIR
-# ==========================
-CCIR_FREQS = {
-    "1": 1124, "2": 1197, "3": 1275, "4": 1358, "5": 1446,
-    "6": 1540, "7": 1640, "8": 1747, "9": 1860, "0": 1981,
-    "A": 2400, "B": 930,  "C": 2246, "D": 991,  "E": 2110
-}
-CCIR_SYMBOLS = list(CCIR_FREQS.keys())
-CCIR_VALUES = np.array(list(CCIR_FREQS.values()), dtype=float)
-
-
-# ==========================
-#  DEFINIZIONI ZVEI-1
-# ==========================
-ZVEI1_FREQS = {
-    "1": 1060, "2": 1160, "3": 1270, "4": 1400, "5": 1530,
-    "6": 1670, "7": 1830, "8": 2000, "9": 2200, "0": 2400,
-    "A": 2800, "B": 810,  "C": 970, "D": 886,  "E": 2600
-}
-ZVEI1_SYMBOLS = list(ZVEI1_FREQS.keys())
-ZVEI1_VALUES = np.array(list(ZVEI1_FREQS.values()), dtype=float)
-
-
-# ==========================
-#  DEFINIZIONI ZVEI-2
-# ==========================
-ZVEI2_FREQS = {
-    "1": 970, "2": 1060, "3": 1160, "4": 1270, "5": 1400,
-    "6": 1530, "7": 1670, "8": 1830, "9": 2000, "0": 2200,
-    "A": 2600, "B": 2800,  "C": 810, "D": 886,  "E": 2400
-}
-ZVEI2_SYMBOLS = list(ZVEI2_FREQS.keys())
-ZVEI2_VALUES = np.array(list(ZVEI2_FREQS.values()), dtype=float)
-
-
-# ==========================
-#  DEFINIZIONI ZVEI-3
-# ==========================
-ZVEI3_FREQS = {
-    "1": 970, "2": 1060, "3": 1160, "4": 1270, "5": 1400,
-    "6": 1530, "7": 1670, "8": 1830, "9": 2000, "0": 2200,
-    "A": 886, "B": 810,  "C": 740, "D": 680,  "E": 2400
-}
-ZVEI3_SYMBOLS = list(ZVEI3_FREQS.keys())
-ZVEI3_VALUES = np.array(list(ZVEI3_FREQS.values()), dtype=float)
-
-
-# ==========================
-#  DEFINIZIONI PCCIR
-# ==========================
-PCCIR_FREQS = {
-    "1": 1124, "2": 1197, "3": 1275, "4": 1358, "5": 1446,
-    "6": 1540, "7": 1640, "8": 1747, "9": 1860, "0": 1981,
-    "A": 1050, "B": 930,  "C": 2400, "D": 991,  "E": 2110
-}
-PCCIR_SYMBOLS = list(PCCIR_FREQS.keys())
-PCCIR_VALUES = np.array(list(PCCIR_FREQS.values()), dtype=float)
+from src.protocolli.CCIR import (
+    CCIR_SYMBOLS,
+    CCIR_VALUES,
+    PCCIR_VALUES,
+    PCCIR_SYMBOLS
+)
+from src.protocolli.ZVEI import (
+    ZVEI1_VALUES,
+    ZVEI1_SYMBOLS,
+    ZVEI2_VALUES,
+    ZVEI2_SYMBOLS,
+    ZVEI3_VALUES,
+    ZVEI3_SYMBOLS
+)
 
 # ===============================
 #  DEFINIZIONI TONI PER SELETTIVA
@@ -390,23 +346,70 @@ def split_hex(hex_string, group_size):
 # -------------------------------
 
 if __name__ == "__main__":
-    import argparse
+
     parser = argparse.ArgumentParser(
-        description= ("Decoder con supporto per selettive CCIR-1/CCIR-2/CCIR-7, PCCIR, ZVEI-1/ZVEI-2/ZVEI-3. "
-                      "Con lunghezza di codifica configurabile."),
+        description="Decoder protocolli selettive CCIR-1/CCIR-2/CCIR-7, PCCIR, ZVEI-1/ZVEI-2/ZVEI-3 da file .wav",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter # <-- mostra i default
     )
-    parser.add_argument("file", nargs="?", default="./selettive_audio/00532.wav",
-                        help="Percorso al file .wav (default: ./selettive_audio/00532.wav)")
-    parser.add_argument("--tone-ms", type=float, default=100.0, help="Lunghezza frame in ms")
-    parser.add_argument("--overlap", type=float, default=0.5, help="Frazione overlap (0..0.9)")
-    parser.add_argument("--plot", action="store_true", help="Mostra grafici diagnostici")
-    parser.add_argument("--debug", action="store_true", help="Stampa debug")
-    parser.add_argument("--noise-factor", type=float, default=5.0, help="Fattore per soglia adattiva")
-    parser.add_argument("--cod", type=str, default="CCIR-1", help="Selettiva per decodificare il file: CCIR-1, CCIR-2, CCIR-7, PCCIR, ZVEI-1, ZVEI-2, ZVEI-3")
-    parser.add_argument("--length-cod", type=int, default=5, help="Lunghezza di codifica")
+
+    parser.add_argument(
+        "file",
+        nargs="?",
+        default="./selettive_audio/00532.wav",
+        help="Percorso al file .wav (default: ./selettive_audio/00532.wav)",
+    )
+    parser.add_argument(
+        "--cod",
+        type=str,
+        default="CCIR-1",
+        help="Selettiva per decodificare il file: CCIR-1, CCIR-2, CCIR-7, PCCIR, ZVEI-1, ZVEI-2, ZVEI-3",
+        required=True
+    )
+
+    parser.add_argument(
+        "--length-cod",
+        type=int,
+        default=5,
+        help="Lunghezza di codifica della selettiva",
+        required=True
+    )
+
+    parser.add_argument(
+        "--tone-ms",
+        type=float,
+        default=100.0,
+        help="Lunghezza frame in ms - Se non presente viene usato il valore di default per la selettiva scelta"
+    )
+
+    parser.add_argument(
+        "--overlap",
+        type=float,
+        default=0.5,
+        help="Frazione overlap (0..0.9)"
+    )
+
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Mostra grafici diagnostici"
+    )
+
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Stampa debug"
+
+    )
+    parser.add_argument(
+        "--noise-factor",
+        type=float,
+        default=5.0,
+        help="Fattore per soglia adattiva"
+    )
 
     args = parser.parse_args()
+
+    # TODO: Gestire dinamicamente il tone_ms in base alla selettiva scelta
 
     decoded, frames = decode_ccir(args.file,
                                 tone_ms=args.tone_ms,

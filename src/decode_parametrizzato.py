@@ -63,6 +63,18 @@ PCCIR_FREQS = {
 PCCIR_SYMBOLS = list(PCCIR_FREQS.keys())
 PCCIR_VALUES = np.array(list(PCCIR_FREQS.values()), dtype=float)
 
+# ===============================
+#  DEFINIZIONI TONI PER SELETTIVA
+# ===============================
+DEFAULT_TONE_MS = {
+    "CCIR-1": 100.0,
+    "CCIR-2": 70.0,
+    "CCIR-7": 70.0,
+    "PCCIR": 100.0,
+    "ZVEI-1": 70.0,
+    "ZVEI-2": 100.0,
+    "ZVEI-3": 70.0
+}
 
 # -------------------------------
 #  FILTRO BANDPASS (butterworth)
@@ -154,7 +166,7 @@ def detect_symbol_for_frame(frame, fs,
 #  DECODER PRINCIPALE
 # -------------------------------
 def decode_ccir(file,
-                tone_ms=100,
+                tone_ms=100.0,
                 overlap=0.5,
                 prebandpass=True,
                 bp_low=700.0,
@@ -178,11 +190,55 @@ def decode_ccir(file,
       - min_abs_power: se fornito, forza una soglia minima assoluta oltre la quale accettare toni
       - debug: stampa informazioni per frame
       - plot: disegna grafici diagnostici
-      - cod: tipo di selettiva 
+      - cod: tipo di selettiva
     Restituisce: (final_string, frames_info)
       frames_info = list di tuple (t_start_sec, symbol, max_power, second_power, idx)
     """
 
+
+    # ==========================
+    #    SELEZIONE DINAMICA
+    # ==========================
+    cod = cod.upper()
+
+    # group_size = length_cod if length_cod is not None else 5
+
+    ###--------------------------------------------------------------------------------------------------------###
+    ###PROBLEMA CHE NON CAMPIONA COME DOVREBBE??, NON CAPISCO COME MAI DATO CHE IL TONO E' IMPOSTATO correttamente
+    ###--------------------------------------------------------------------------------------------------------###
+
+    #imposto il tone_ms in base alla selettiva scelta
+    tone_ms = DEFAULT_TONE_MS.get(cod) #se non trovo il corrispondente imposto 100ms
+    print("tone usato: ",  DEFAULT_TONE_MS.get(cod)) #per debug
+
+
+    if cod in ("CCIR-1", "CCIR-2", "CCIR-7"):
+        freq_list = CCIR_VALUES
+        symbol_list = CCIR_SYMBOLS
+
+    elif cod == "ZVEI-1":
+        freq_list = ZVEI1_VALUES
+        symbol_list = ZVEI1_SYMBOLS
+
+    elif cod == "ZVEI-2":
+        freq_list = ZVEI2_VALUES
+        symbol_list = ZVEI2_SYMBOLS
+
+    elif cod == "ZVEI-3":
+        freq_list = ZVEI3_VALUES
+        symbol_list = ZVEI3_SYMBOLS
+
+    elif cod == "PCCIR":
+        freq_list = PCCIR_VALUES
+        symbol_list = PCCIR_SYMBOLS
+
+    else:
+        raise ValueError(f"Codifica selettiva sconosciuta: {cod}")
+    
+
+    # ==========================
+    #    LETTURA FILE
+    # ==========================
     audio, fs = sf.read(file)
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
@@ -208,11 +264,13 @@ def decode_ccir(file,
     frames_info = []
     for i, frame in enumerate(frames):
         # usare detect_symbol_for_frame che ritorna massimo e secondo
-        symbol, max_p, second_p, idx = detect_symbol_for_frame(frame, fs,
-                                                               freq_list=CCIR_VALUES,
-                                                               symbol_list=CCIR_SYMBOLS,
-                                                               band=band,
-                                                               ratio_threshold=ratio_threshold)
+        symbol, max_p, second_p, idx = detect_symbol_for_frame(
+            frame, fs,
+            freq_list=freq_list,
+            symbol_list=symbol_list,
+            band=band,
+            ratio_threshold=ratio_threshold)
+        
         frame_powers.append(max_p)
         t_start = starts[i] / fs
         frames_info.append((t_start, symbol, max_p, second_p, idx))
@@ -229,13 +287,13 @@ def decode_ccir(file,
 
     # applica soglia e ratio per ottenere simbolo netto per frame
     final_frames = []
-    for (t_start, symbol, max_p, second_p, idx) in frames_info:
+    for (t, symbol, max_p, second_p, idx) in frames_info:
         # se la potenza non supera la soglia adattiva -> vuoto
         if max_p < adaptive_threshold:
-            final_frames.append((t_start, "-", max_p, second_p, idx))
+            final_frames.append((t, "-", max_p, second_p, idx))
         else:
             # ratio già applicata dentro detect_symbol_for_frame; se symbol=='-' potrà rimanere '-'
-            final_frames.append((t_start, symbol, max_p, second_p, idx))
+            final_frames.append((t, symbol, max_p, second_p, idx))
 
     # POST-PROCESSING: compressione e rimozione duplicati vicini
     # 1) elimina simboli '-' (silenzio) o li trasforma in separatori
@@ -247,12 +305,14 @@ def decode_ccir(file,
     # compress consecutive duplicates (es. ['5','5','-','-','5'] -> ['5','-','5'])
     compressed = []
     for s in seq:
-        if not compressed:
+        if not compressed or s != compressed[-1]:
             compressed.append(s)
-        else:
-            if s == compressed[-1]:
-                continue
-            compressed.append(s)
+        # if not compressed:
+        #     compressed.append(s)
+        # else:
+        #     if s == compressed[-1]:
+        #         continue
+        #     compressed.append(s)
 
     # opzione: rimuovere '-' del tutto (si possono interpretare come "silenzio")
     # ma per sicurezza lasciamo solo come separatore e poi rimuoviamo leading/trailing
@@ -292,15 +352,15 @@ def decode_ccir(file,
     # restituisce anche le informazioni per frame per debugging
     return final_string, final_frames
 
-def split_hex(hex_string, group_size=5): 
-    
+def split_hex(hex_string, group_size):
+
     #Divide una stringa in gruppi di ma prima taglia la stessa dopo il pattern desiderato se presente
 
     hex_string = hex_string.upper()
-    
+
     pattern = "4E4E"
 
-    # Taglia tutto dopo il pattern 
+    # Taglia tutto dopo il pattern
     idx = hex_string.find(pattern)
     if idx != -1:
         hex_string = hex_string[:idx + len(pattern)] #se c'e' pattern taglia
@@ -309,9 +369,12 @@ def split_hex(hex_string, group_size=5):
 
     for i in range(1, len(hex_list)):
         if hex_list[i] == 'E':
-            hex_list[i] = hex_list[i-1] 
+            hex_list[i] = hex_list[i-1]
 
-    
+
+    #se l'utente non specifica la lunghezza di codifica, usa default 5
+    group_size = group_size if group_size is not None else 5  
+
     # Divide in gruppi
     groups = [hex_list[i:i+group_size] for i in range(0, len(hex_list), group_size)]
 
@@ -340,7 +403,8 @@ if __name__ == "__main__":
     parser.add_argument("--plot", action="store_true", help="Mostra grafici diagnostici")
     parser.add_argument("--debug", action="store_true", help="Stampa debug")
     parser.add_argument("--noise-factor", type=float, default=5.0, help="Fattore per soglia adattiva")
-    parser.add_argument("--cod", type=str, default="CCIR-1", help="Selettiva per decodificare il file")
+    parser.add_argument("--cod", type=str, default="CCIR-1", help="Selettiva per decodificare il file: CCIR-1, CCIR-2, CCIR-7, PCCIR, ZVEI-1, ZVEI-2, ZVEI-3")
+    parser.add_argument("--length-cod", type=int, default=5, help="Lunghezza di codifica")
 
     args = parser.parse_args()
 
@@ -354,4 +418,4 @@ if __name__ == "__main__":
                                 )
 
     # print("Decoded:", decoded)
-    print("Decoded:", split_hex(decoded))
+    print("Decoded:", split_hex(decoded, args.length_cod))   

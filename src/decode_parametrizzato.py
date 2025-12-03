@@ -8,7 +8,7 @@ from src.protocolli.CCIR import (
     CCIR_SYMBOLS,
     CCIR_VALUES,
     PCCIR_VALUES,
-    PCCIR_SYMBOLS
+    PCCIR_SYMBOLS, CCIR_CODE_LEN_MS
 )
 from src.protocolli.ZVEI import (
     ZVEI1_VALUES,
@@ -16,21 +16,11 @@ from src.protocolli.ZVEI import (
     ZVEI2_VALUES,
     ZVEI2_SYMBOLS,
     ZVEI3_VALUES,
-    ZVEI3_SYMBOLS
+    ZVEI3_SYMBOLS, ZVEI_TONE_MS
 )
 
-# ===============================
-#  DEFINIZIONI TONI PER SELETTIVA
-# ===============================
-DEFAULT_TONE_MS = {
-    "CCIR-1": 100.0,
-    "CCIR-2": 70.0,
-    "CCIR-7": 70.0,
-    "PCCIR": 100.0,
-    "ZVEI-1": 70.0,
-    "ZVEI-2": 100.0,
-    "ZVEI-3": 70.0
-}
+DEBUG_ENABLED = False
+
 
 # -------------------------------
 #  FILTRO BANDPASS (butterworth)
@@ -117,23 +107,38 @@ def detect_symbol_for_frame(frame, fs,
 
     return (symbol_list[idx], max_p, second_p, idx) if ratio >= ratio_threshold else ("-", max_p, second_p, idx)
 
+# -------------------------------
+#  IMPOSTA TONO IN BASE A PROTOCOLLO
+# -------------------------------
+def set_tone_ms_for_protocol(protocollo):
+    protocollo = protocollo.upper()
+    if protocollo in ["CCIR-1", "PCCIR", "CCIR-2", "CCIR-7"]:
+        return CCIR_CODE_LEN_MS.get(protocollo)
+    elif protocollo in ["ZVEI-1", "ZVEI-2", "ZVEI-3"]:
+        return ZVEI_TONE_MS
+    else:
+        return 100.0  # default fallback
+
+
+def debug_log(*args):
+    if DEBUG_ENABLED:
+        print("[DEBUG]: ", *args)
 
 # -------------------------------
 #  DECODER PRINCIPALE
 # -------------------------------
-def decode_ccir(file,
-                tone_ms=100.0,
-                overlap=0.5,
-                prebandpass=True,
-                bp_low=700.0,
-                bp_high=2500.0,
-                band=8,
-                ratio_threshold=3.0,
-                noise_factor=5.0,
-                min_abs_power=None,
-                debug=False,
-                plot=False,
-                cod="CCIR-1"):
+def decode(file,
+           tone_ms=None,
+           overlap=0.5,
+           prebandpass=True,
+           bp_low=700.0,
+           bp_high=2500.0,
+           band=8,
+           ratio_threshold=3.0,
+           noise_factor=5.0,
+           min_abs_power=None,
+           plot=False,
+           protocollo="CCIR-1"):
     """
     Decodifica selettiva scelta di un file .wav.
     Parametri principali:
@@ -155,7 +160,7 @@ def decode_ccir(file,
     # ==========================
     #    SELEZIONE DINAMICA
     # ==========================
-    cod = cod.upper()
+    protocollo = protocollo.upper()
 
     # group_size = length_cod if length_cod is not None else 5
 
@@ -164,38 +169,46 @@ def decode_ccir(file,
     ###--------------------------------------------------------------------------------------------------------###
 
     #imposto il tone_ms in base alla selettiva scelta
-    tone_ms = DEFAULT_TONE_MS.get(cod) #se non trovo il corrispondente imposto 100ms
-    print("tone usato: ",  DEFAULT_TONE_MS.get(cod)) #per debug
+    # tone_ms = DEFAULT_TONE_MS.get(protocollo) #se non trovo il corrispondente imposto 100ms
+    # print("tone usato: ", DEFAULT_TONE_MS.get(protocollo)) #per debug
 
+    match protocollo:
+        case "CCIR-1" | "CCIR-2" | "CCIR-7":
+            freq_list = CCIR_VALUES
+            symbol_list = CCIR_SYMBOLS
+            if tone_ms is None:
+                tone_ms = set_tone_ms_for_protocol(protocollo)
+        case "ZVEI-1":
+            freq_list = ZVEI1_VALUES
+            symbol_list = ZVEI1_SYMBOLS
+            if tone_ms is None:
+                tone_ms = set_tone_ms_for_protocol(protocollo)
+        case "ZVEI-2":
+            freq_list = ZVEI2_VALUES
+            symbol_list = ZVEI2_SYMBOLS
+            if tone_ms is None:
+                tone_ms = set_tone_ms_for_protocol(protocollo)
+        case "ZVEI-3":
+            freq_list = ZVEI3_VALUES
+            symbol_list = ZVEI3_SYMBOLS
+            if tone_ms is None:
+                tone_ms = set_tone_ms_for_protocol(protocollo)
+        case "PCCIR":
+            freq_list = PCCIR_VALUES
+            symbol_list = PCCIR_SYMBOLS
+            if tone_ms is None:
+                tone_ms = set_tone_ms_for_protocol(protocollo)
+        case _:
+            raise ValueError(f"Codifica selettiva sconosciuta: {protocollo}")
 
-    if cod in ("CCIR-1", "CCIR-2", "CCIR-7"):
-        freq_list = CCIR_VALUES
-        symbol_list = CCIR_SYMBOLS
-
-    elif cod == "ZVEI-1":
-        freq_list = ZVEI1_VALUES
-        symbol_list = ZVEI1_SYMBOLS
-
-    elif cod == "ZVEI-2":
-        freq_list = ZVEI2_VALUES
-        symbol_list = ZVEI2_SYMBOLS
-
-    elif cod == "ZVEI-3":
-        freq_list = ZVEI3_VALUES
-        symbol_list = ZVEI3_SYMBOLS
-
-    elif cod == "PCCIR":
-        freq_list = PCCIR_VALUES
-        symbol_list = PCCIR_SYMBOLS
-
-    else:
-        raise ValueError(f"Codifica selettiva sconosciuta: {cod}")
+    debug_log(f"Decodifica con protocollo: {protocollo}, lunghezza tono impostata a: {tone_ms} ms")
     
 
     # ==========================
     #    LETTURA FILE
     # ==========================
     audio, fs = sf.read(file)
+    # Rendiamo il segnale mono se stereo
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
     audio = audio.astype(float)
@@ -225,7 +238,8 @@ def decode_ccir(file,
             freq_list=freq_list,
             symbol_list=symbol_list,
             band=band,
-            ratio_threshold=ratio_threshold)
+            ratio_threshold=ratio_threshold
+        )
         
         frame_powers.append(max_p)
         t_start = starts[i] / fs
@@ -237,9 +251,8 @@ def decode_ccir(file,
     if min_abs_power is not None:
         adaptive_threshold = max(adaptive_threshold, float(min_abs_power))
 
-    if debug:
-        print(f"Fs={fs}, tone_len={tone_len} samples ({tone_ms} ms), hop={hop} samples")
-        print(f"Frames: {len(frames)}, median_noise={median_noise:.3e}, adaptive_threshold={adaptive_threshold:.3e}")
+    debug_log(f"Fs={fs}, tone_len={tone_len} samples ({tone_ms} ms), hop={hop} samples")
+    debug_log(f"Frames: {len(frames)}, median_noise={median_noise:.3e}, adaptive_threshold={adaptive_threshold:.3e}")
 
     # applica soglia e ratio per ottenere simbolo netto per frame
     final_frames = []
@@ -276,10 +289,9 @@ def decode_ccir(file,
 
     final_string = "".join(cleaned)
 
-    if debug:
-        print("Compressed frames (unique consecutive):", compressed)
-        print("Cleaned (no '-'): ", cleaned)
-        print("Final decoded string:", final_string)
+    debug_log("Compressed frames (unique consecutive):", compressed)
+    debug_log("Cleaned (no '-'): ", cleaned)
+    debug_log("Final decoded string:", final_string)
 
     if plot:
         # plot potenze e decisioni
@@ -311,7 +323,6 @@ def decode_ccir(file,
 def split_hex(hex_string, group_size):
 
     #Divide una stringa in gruppi di ma prima taglia la stessa dopo il pattern desiderato se presente
-
     hex_string = hex_string.upper()
 
     pattern = "4E4E"
@@ -377,7 +388,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tone-ms",
         type=float,
-        default=100.0,
+        default=None,
         help="Lunghezza frame in ms - Se non presente viene usato il valore di default per la selettiva scelta"
     )
 
@@ -411,14 +422,17 @@ if __name__ == "__main__":
 
     # TODO: Gestire dinamicamente il tone_ms in base alla selettiva scelta
 
-    decoded, frames = decode_ccir(args.file,
-                                tone_ms=args.tone_ms,
-                                overlap=args.overlap,
-                                noise_factor=args.noise_factor,
-                                debug=args.debug,
-                                plot=args.plot,
-                                cod=args.cod
-                                )
+    if args.debug:
+        DEBUG_ENABLED = True
+
+    decoded, frames = decode(
+        args.file,
+        tone_ms=args.tone_ms,
+        overlap=args.overlap,
+        noise_factor=args.noise_factor,
+        plot=args.plot,
+        protocollo=args.cod
+    )
 
     # print("Decoded:", decoded)
     print("Decoded:", split_hex(decoded, args.length_cod))   

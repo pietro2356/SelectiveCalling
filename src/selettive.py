@@ -27,7 +27,7 @@ DEBUG_ENABLED = False
 
 
 # -------------------------------
-#  FILTRO BANDPASS (butterworth)
+#  BANDPASS FILTER (butterworth)
 # -------------------------------
 def bandpass_filter(signal, fs, lowcut=700.0, highcut=2500.0, order=4):
     nyq = 0.5 * fs
@@ -37,7 +37,7 @@ def bandpass_filter(signal, fs, lowcut=700.0, highcut=2500.0, order=4):
     return filtfilt(b, a, signal)
 
 # -------------------------------
-#  GOERTZEL - IMPLEMENTAZIONE CORRETTA
+#  GOERTZEL FILTER
 # -------------------------------
 def goertzel(samples, sample_rate, freq):
     """
@@ -76,7 +76,7 @@ def goertzel_band(samples, center_freq, fs, band=8, steps=5):
 
 
 # -------------------------------
-#  DECISIONE PER SINGOLO FRAME
+#  DETECT SYMBOL FOR FRAME
 # -------------------------------
 def detect_symbol_for_frame(frame, fs,
                             freq_list=CCIR_VALUES,
@@ -84,11 +84,11 @@ def detect_symbol_for_frame(frame, fs,
                             band=8,
                             ratio_threshold=3.0):
     """
-    Restituisce (symbol, max_power, second_power, idx)
-    symbol = '-' se nessuna decisione.
-    L'algoritmo usa sia soglia assoluta (da fuori) che ratio primo/secondo per robustezza.
+    Returns (symbol, max_power, second_power, idx)
+    symbol = '-' if no decision.
+    The algorithm uses both absolute threshold (from outside) and first/second ratio for robustness.
     """
-    # finestrare il frame (riduce leakage)
+    # windowing
     w = np.hamming(len(frame))
     frame_win = frame * w
 
@@ -98,20 +98,16 @@ def detect_symbol_for_frame(frame, fs,
 
     idx = int(np.argmax(powers))
     max_p = float(powers[idx])
-    # seconda potenza massima
+    # remove max to find second
     powers[idx] = 0.0
     second_p = float(np.max(powers))
 
-    # restore (non necessario dopo)
-    # powers[idx] = max_p
-
-    # ratio check
     ratio = (max_p / (second_p + 1e-12)) if second_p > 0 else np.inf
 
     return (symbol_list[idx], max_p, second_p, idx) if ratio >= ratio_threshold else ("-", max_p, second_p, idx)
 
 # -------------------------------
-#  IMPOSTA TONO IN BASE A PROTOCOLLO
+#  SET TONE MS BASED ON PROTOCOL
 # -------------------------------
 def set_tone_ms_for_protocol(protocollo):
     protocollo = protocollo.upper()
@@ -131,7 +127,7 @@ def debug_log(*args):
         print("[DEBUG]: ", *args)
 
 # -------------------------------
-#  DECODER PRINCIPALE
+#  DECODER FUNCTION
 # -------------------------------
 def decode(file,
            tone_ms=None,
@@ -146,29 +142,23 @@ def decode(file,
            plot=False,
            protocollo="CCIR-1"):
     """
-    Decodifica selettiva scelta di un file .wav.
-    Parametri principali:
-      - tone_ms: lunghezza di frame (ms) usata per campionare (default 100)
-      - overlap: frazione di overlap tra frame (0..0.9), default 0.5 (50% overlap)
-      - prebandpass: applica filtro band-pass prima dell'analisi
-      - band: banda di ricerca intorno alla freq centrale (Hz)
-      - ratio_threshold: primo/secondo rapporto minimo per accettare una decisione
-      - noise_factor: fattore per ricavare soglia assoluta (soglia = median_noise * noise_factor)
-      - min_abs_power: se fornito, forza una soglia minima assoluta oltre la quale accettare toni
-      - debug: stampa informazioni per frame
-      - plot: disegna grafici diagnostici
-      - cod: tipo di selettiva
-    Restituisce: (final_string, frames_info)
-      frames_info = list di tuple (t_start_sec, symbol, max_power, second_power, idx)
+    Selective decoding of a .wav file.
+    Main parameters:
+      - tone_ms: frame length (ms) used for sampling (default None)
+      - overlap: fraction of overlap between frames (0..0.9), default 0.5 (50% overlap)
+      - prebandpass: applies band-pass filter before analysis
+      - band: search band around center frequency (Hz)
+      - ratio_threshold: minimum first/second ratio to accept a decision
+      - noise_factor: factor to obtain absolute threshold (threshold = median_noise * noise_factor)
+      - min_abs_power: if provided, forces a minimum absolute threshold above which tones are accepted
+      - debug: prints information per frame
+      - plot: draws diagnostic graphs
+      - cod: type of selective filter
+    Returns: (final_string, frames_info)
+      frames_info = list of tuples (t_start_sec, symbol, max_power, second_power, idx)
     """
 
-
-    # ==========================
-    #    SELEZIONE DINAMICA
-    # ==========================
     protocollo = protocollo.upper()
-
-    # group_size = length_cod if length_cod is not None else 5
 
     match protocollo:
         case "CCIR-1" | "CCIR-2" | "CCIR-7":
@@ -198,15 +188,15 @@ def decode(file,
     
 
     # ==========================
-    #    LETTURA FILE
+    #  FILE READING
     # ==========================
     audio, fs = sf.read(file)
-    # Rendiamo il segnale mono se stereo
+    # Stereo to mono
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
     audio = audio.astype(float)
 
-    # prefilter (opzionale)
+    # Prefilter (optional)
     if prebandpass:
         audio = bandpass_filter(audio, fs, lowcut=bp_low, highcut=bp_high, order=4)
 
@@ -215,13 +205,13 @@ def decode(file,
     if hop <= 0:
         hop = max(1, tone_len // 2)
 
-    # prepara frames
+    # Frame splitting
     frames = []
     starts = list(range(0, max(0, len(audio) - tone_len + 1), hop))
     for s in starts:
         frames.append(audio[s:s + tone_len])
 
-    # raccogli potenze (per calcolare soglia adattiva)
+    #  FRAME ANALYSIS
     frame_powers = []
     frames_info = []
     for i, frame in enumerate(frames):
@@ -238,7 +228,7 @@ def decode(file,
         t_start = starts[i] / fs
         frames_info.append((t_start, symbol, max_p, second_p, idx))
 
-    # soglia adattiva: usa mediana dei frame come rumore di fondo
+    # Adaptive thresholding based on median noise
     median_noise = float(np.median(frame_powers))
     adaptive_threshold = median_noise * noise_factor
     if min_abs_power is not None:
@@ -247,37 +237,31 @@ def decode(file,
     debug_log(f"Fs={fs}, tone_len={tone_len} samples ({tone_ms} ms), hop={hop} samples")
     debug_log(f"Frames: {len(frames)}, median_noise={median_noise:.3e}, adaptive_threshold={adaptive_threshold:.3e}")
 
-    # applica soglia e ratio per ottenere simbolo netto per frame
+    # APPLY THRESHOLDING
     final_frames = []
     for (t, symbol, max_p, second_p, idx) in frames_info:
-        # se la potenza non supera la soglia adattiva -> vuoto
+        # If below threshold, set symbol to '-'
         if max_p < adaptive_threshold:
             final_frames.append((t, "-", max_p, second_p, idx))
         else:
-            # ratio già applicata dentro detect_symbol_for_frame; se symbol=='-' potrà rimanere '-'
+            # keep detected symbol
             final_frames.append((t, symbol, max_p, second_p, idx))
 
-    # POST-PROCESSING: compressione e rimozione duplicati vicini
-    # 1) elimina simboli '-' (silenzio) o li trasforma in separatori
-    # 2) riduce sequenze ripetute consecutive a singolo simbolo
+    # POST-PROCESSING: compression and removal of nearby duplicates
+    # 1) removes ‘-’ symbols (silence) or transforms them into separators
+    # 2) reduces consecutive repeated sequences to a single symbol
     seq = []
     for t_start, symbol, max_p, second_p, idx in final_frames:
         seq.append(symbol)
 
-    # compress consecutive duplicates (es. ['5','5','-','-','5'] -> ['5','-','5'])
+    # Compress consecutive duplicates (es. ['5','5','-','-','5'] -> ['5','-','5'])
     compressed = []
     for s in seq:
         if not compressed or s != compressed[-1]:
             compressed.append(s)
-        # if not compressed:
-        #     compressed.append(s)
-        # else:
-        #     if s == compressed[-1]:
-        #         continue
-        #     compressed.append(s)
 
-    # opzione: rimuovere '-' del tutto (si possono interpretare come "silenzio")
-    # ma per sicurezza lasciamo solo come separatore e poi rimuoviamo leading/trailing
+    # option: remove ‘-’ altogether (they can be interpreted as “silence”)
+    # but to be on the safe side, let's just leave them as separators and then remove leading/trailing ones
     cleaned = [c for c in compressed if c != '-']
 
     final_string = "".join(cleaned)
@@ -287,7 +271,7 @@ def decode(file,
     debug_log("Final decoded string:", final_string)
 
     if plot:
-        # plot potenze e decisioni
+        # plot max power per frame with decisions
         times = [t for (t, _, _, _, _) in final_frames]
         mags = [p for (_, _, p, _, _) in final_frames]
         symb = [s for (_, s, _, _, _) in final_frames]
@@ -304,19 +288,19 @@ def decode(file,
         plt.grid(True)
         plt.show()
 
-        # opzionale: histogram of powers
+        # histogram of frame powers (optional)
         plt.figure(figsize=(6,3))
         plt.hist(frame_powers, bins=60)
         plt.title("Histogram of frame max powers")
         plt.show()
 
-    # restituisce anche le informazioni per frame per debugging
+    # RETURN FINAL STRING AND FRAMES INFO
     return final_string, final_frames
 
 # -------------------------------
-#  FUNZIONE DI SPLIT HEX
+#  SELECTIVE FORMATTING
 # -------------------------------
-def selective_formatter(selective_string, group_size, protocol="ZVEI", format="MINIMAL"):
+def selective_formatter(selective_string, group_size, protocol="ZVEI", format_output="MINIMAL"):
     # Pattern normalization and trimming
     selective_string = selective_string.upper()
     pattern = "4E4E"
@@ -325,14 +309,11 @@ def selective_formatter(selective_string, group_size, protocol="ZVEI", format="M
         selective_string = selective_string[:idx + len(pattern)]
 
     hex_list = list(selective_string)
-
-    # print(hex_list)
+    debug_log("Initial hex list:", hex_list)
 
     # default group_size
     group_size = group_size if group_size is not None else 5
 
-    # recupero il carattere di pausa dal protocollo
-    # char usati per indicare ripetizione (incluso 'C' per compatibilità)
     pause_char = None
     repeat_char = None
 
@@ -356,26 +337,26 @@ def selective_formatter(selective_string, group_size, protocol="ZVEI", format="M
         if char == repeat_char or char == pause_char:
             # se il carattere di pausa specifico è esattamente al confine => pausa (skip)
             if pause_char and char == pause_char and i != 0 and (i % group_size) == 0:
-                debug_log("Skipping pause char at index:", i)
+                #debug_log("Skipping pause char at index:", i)
                 continue
             # altrimenti è ripetizione: uso l'ultimo carattere valido già inserito
             if new_list:
-                debug_log("Repeating last valid char:", new_list[-1])
+                #debug_log("Repeating last valid char:", new_list[-1])
                 new_list.append(new_list[-1])
             else:
                 prev = hex_list[i - 1] if i - 1 >= 0 else ''
-                debug_log("No previous valid char, using previous from original list:", prev)
+                #debug_log("No previous valid char, using previous from original list:", prev)
                 new_list.append(prev)
         else:
-            debug_log("Adding char to new list:", char)
+            #debug_log("Adding char to new list:", char)
             new_list.append(char)
 
-    # suddivido in gruppi di group_size e formato output
+    # Grouping
     groups = [new_list[i:i + group_size] for i in range(0, len(new_list), group_size)]
 
     groups_str = ["".join(g) for g in groups]
 
-    if format == "MINIMAL":
+    if format_output == "MINIMAL":
         return "-".join(groups_str)
     else:
         sel_src = ""
@@ -394,7 +375,7 @@ def selective_formatter(selective_string, group_size, protocol="ZVEI", format="M
 
 
 # -------------------------------
-#  ESEMPIO DI USO DA CLI
+#  MAIN PROGRAM
 # -------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -495,13 +476,13 @@ if __name__ == "__main__":
     )
 
     print("Original:", decoded)
-    print("Decoded:", selective_formatter(decoded, args.l, format=args.format))
+    print("Decoded:", selective_formatter(decoded, args.l, format_output=args.format))
 
 # OK: Aggiustare frequenza basate su Gazzetta Ufficiale
 # OK: Pulire codice
 #           - Pulire nomi parametri
 # TODO: Test Selettive registrate
-# TODO: Commentare codice in inglese
+# OK: Commentare codice in inglese
 # OK: Correggere funzione di sostituzione tono ripetitore in base a codifica
 # TODO: Blocchi GNURadio
 # TODO: Codifica

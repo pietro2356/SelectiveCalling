@@ -4,19 +4,19 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt
 import argparse
 
-from src.protocolli.CCIR import (
+from protocolli.CCIR import (
     CCIR_SYMBOLS,
     CCIR_VALUES,
     PCCIR_VALUES,
-    PCCIR_SYMBOLS, CCIR_CODE_LEN_MS
+    PCCIR_SYMBOLS,
+    CCIR_CODE_LEN_MS
 )
-from src.protocolli.ZVEI import (
+from protocolli.ZVEI import (
     ZVEI1_VALUES,
     ZVEI1_SYMBOLS,
     ZVEI2_VALUES,
     ZVEI2_SYMBOLS,
-    ZVEI3_VALUES,
-    ZVEI3_SYMBOLS, ZVEI_TONE_MS
+    ZVEI_TONE_MS
 )
 
 DEBUG_ENABLED = False
@@ -31,7 +31,6 @@ def bandpass_filter(signal, fs, lowcut=700.0, highcut=2500.0, order=4):
     high = highcut / nyq
     b, a = butter(order, [low, high], btype='band')
     return filtfilt(b, a, signal)
-
 
 # -------------------------------
 #  GOERTZEL - IMPLEMENTAZIONE CORRETTA
@@ -120,6 +119,9 @@ def set_tone_ms_for_protocol(protocollo):
         return 100.0  # default fallback
 
 
+# -------------------------------
+#  DEBUG LOGGING
+# -------------------------------
 def debug_log(*args):
     if DEBUG_ENABLED:
         print("[DEBUG]: ", *args)
@@ -164,14 +166,6 @@ def decode(file,
 
     # group_size = length_cod if length_cod is not None else 5
 
-    ###--------------------------------------------------------------------------------------------------------###
-    ###PROBLEMA CHE NON CAMPIONA COME DOVREBBE??, NON CAPISCO COME MAI DATO CHE IL TONO E' IMPOSTATO correttamente
-    ###--------------------------------------------------------------------------------------------------------###
-
-    #imposto il tone_ms in base alla selettiva scelta
-    # tone_ms = DEFAULT_TONE_MS.get(protocollo) #se non trovo il corrispondente imposto 100ms
-    # print("tone usato: ", DEFAULT_TONE_MS.get(protocollo)) #per debug
-
     match protocollo:
         case "CCIR-1" | "CCIR-2" | "CCIR-7":
             freq_list = CCIR_VALUES
@@ -186,11 +180,6 @@ def decode(file,
         case "ZVEI-2":
             freq_list = ZVEI2_VALUES
             symbol_list = ZVEI2_SYMBOLS
-            if tone_ms is None:
-                tone_ms = set_tone_ms_for_protocol(protocollo)
-        case "ZVEI-3":
-            freq_list = ZVEI3_VALUES
-            symbol_list = ZVEI3_SYMBOLS
             if tone_ms is None:
                 tone_ms = set_tone_ms_for_protocol(protocollo)
         case "PCCIR":
@@ -320,107 +309,136 @@ def decode(file,
     # restituisce anche le informazioni per frame per debugging
     return final_string, final_frames
 
-def split_hex(hex_string, group_size):
-
-    #Divide una stringa in gruppi di ma prima taglia la stessa dopo il pattern desiderato se presente
+# -------------------------------
+#  FUNZIONE DI SPLIT HEX
+# -------------------------------
+def split_hex(hex_string, group_size, sep=False):
+    # normalizzazione e trimming del pattern
     hex_string = hex_string.upper()
-
     pattern = "4E4E"
-
-    # Taglia tutto dopo il pattern
     idx = hex_string.find(pattern)
     if idx != -1:
-        hex_string = hex_string[:idx + len(pattern)] #se c'e' pattern taglia
+        hex_string = hex_string[:idx + len(pattern)]
 
-    hex_list = list(hex_string)  # converto in lista per modifiche
+    hex_list = list(hex_string)
 
-    for i in range(1, len(hex_list)):
-        if hex_list[i] == 'E':
-            hex_list[i] = hex_list[i-1]
+    # default group_size
+    group_size = group_size if group_size is not None else 5
 
+    # costruisco una nuova lista dove:
+    # - una 'E' posta esattamente all'indice i == n * group_size (con n>0) viene rimossa (pausa)
+    # - le altre 'E' vengono sostituite con il carattere precedente (ripetizione)
+    new_list = []
+    for i, ch in enumerate(hex_list):
+        if ch == 'E' or ch == 'C': # FIXME: Gestire anche 'C' se usato come ripetizione
+            if i != 0 and (i % group_size) == 0:
+                # pausa al confine: salto il carattere
+                continue
+            # ripetizione: uso l'ultimo carattere valido già inserito
+            if new_list:
+                new_list.append(new_list[-1])
+            else:
+                # fallback: se non ci sono precedenti uso il precedente dell'originale (se esiste)
+                prev = hex_list[i - 1] if i - 1 >= 0 else ''
+                new_list.append(prev)
+        else:
+            new_list.append(ch)
 
-    #se l'utente non specifica la lunghezza di codifica, usa default 5
-    group_size = group_size if group_size is not None else 5  
+    # suddivido in gruppi di group_size e formato output
+    groups = [new_list[i:i + group_size] for i in range(0, len(new_list), group_size)]
 
-    # Divide in gruppi
-    groups = [hex_list[i:i+group_size] for i in range(0, len(hex_list), group_size)]
+    sel_src = ""
+    sel_dest = ""
 
-    # Trasforma ogni sottolista in stringa e formatta con parentesi tonde
+    for c in groups[0]:
+        sel_src += c + ""
+
+    for c in groups[1]:
+        sel_dest += c + ""
+
+    debug_log("Source:", sel_src)
+    debug_log("Dest:", sel_dest)
+
     groups_str = ["(" + "".join(g) + ")" for g in groups]
-
-    # Unisce con trattino
     return "-".join(groups_str)
 
 
 # -------------------------------
 #  ESEMPIO DI USO DA CLI
 # -------------------------------
-
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(
-        description="Decoder protocolli selettive CCIR-1/CCIR-2/CCIR-7, PCCIR, ZVEI-1/ZVEI-2/ZVEI-3 da file .wav",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter # <-- mostra i default
+        prog="[SCPD] - Selective Calling Protocol Decoder",
+        usage="%(prog)s [options] <file.wav>",
+        description="Selective protocol decoders CCIR-1/CCIR-2/CCIR-7, PCCIR, ZVEI-1/ZVEI-2/ZVEI-3 from .wav files",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
     parser.add_argument(
         "file",
         nargs="?",
         default="./selettive_audio/00532.wav",
-        help="Percorso al file .wav (default: ./selettive_audio/00532.wav)",
+        help="Path to the .wav file (default: ./selettive_audio/00532.wav)",
     )
+
     parser.add_argument(
-        "--cod",
+        "-p",
         type=str,
         default="CCIR-1",
-        help="Selettiva per decodificare il file: CCIR-1, CCIR-2, CCIR-7, PCCIR, ZVEI-1, ZVEI-2, ZVEI-3",
-        required=True
+        help="Protocol for selective decoding: CCIR-1, CCIR-2 (CCIR-7), PCCIR, ZVEI-1, ZVEI-2",
+        required=True,
+        choices=["CCIR-1", "CCIR-2", "CCIR-7", "PCCIR", "ZVEI-1", "ZVEI-2"],
     )
 
     parser.add_argument(
-        "--length-cod",
+        "-l",
         type=int,
         default=5,
-        help="Lunghezza di codifica della selettiva",
-        required=True
+        help="Selective coding length",
+        required=True,
+        choices=[3, 4, 5, 6],
     )
 
     parser.add_argument(
-        "--tone-ms",
+        "-tm",
         type=float,
         default=None,
-        help="Lunghezza frame in ms - Se non presente viene usato il valore di default per la selettiva scelta"
+        help="Frame length in ms. If not present, the default value for the selective choice is used.",
+        choices=[70, 100]
     )
 
     parser.add_argument(
-        "--overlap",
+        "-o",
         type=float,
         default=0.5,
-        help="Frazione overlap (0..0.9)"
+        help="Fractional overlap (0..0.9)",
+        choices=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     )
 
     parser.add_argument(
+        "-pl",
         "--plot",
+        default=False,
         action="store_true",
-        help="Mostra grafici diagnostici"
+        help="Display diagnostic charts"
     )
 
     parser.add_argument(
+        "-d",
         "--debug",
+        default=False,
         action="store_true",
-        help="Stampa debug"
-
+        help="Display debugging information"
     )
     parser.add_argument(
+        "-nf",
         "--noise-factor",
         type=float,
         default=5.0,
-        help="Fattore per soglia adattiva"
+        help="Adaptive noise threshold factor"
     )
 
     args = parser.parse_args()
-
-    # TODO: Gestire dinamicamente il tone_ms in base alla selettiva scelta
 
     if args.debug:
         DEBUG_ENABLED = True
@@ -434,5 +452,16 @@ if __name__ == "__main__":
         protocollo=args.cod
     )
 
-    # print("Decoded:", decoded)
-    print("Decoded:", split_hex(decoded, args.length_cod))   
+    print("Decoded:", decoded)
+    print("Decoded:", split_hex(decoded, args.length_cod))
+
+# OK: Aggiustare frequenza basate su Gazzetta Ufficiale
+# OK: Pulire codice
+#           - Pulire nomi parametri
+# TODO: Test Selettive registrate
+# TODO: Commentare codice in inglese
+# FIXME: Correggere funzione di sostituzione tono ripetitore in base a codifica
+# TODO: Blocchi GNURadio
+# TODO: Codifica
+
+

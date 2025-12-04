@@ -32,7 +32,7 @@ ZVEI_TONE_MS = 70
 # ==========================
 #  ZVEI REPEATER TONE DEFINITION
 # ==========================
-ZVEI_TONE_CH_REPEATER = "C" # FIXME: Some references say "E"
+ZVEI_TONE_CH_REPEATER = "E"
 ZVEI_TONE_CH_REPEATER_FREQ = ZVEI1_FREQS[ZVEI_TONE_CH_REPEATER]
 
 # ==========================
@@ -40,3 +40,9 @@ ZVEI_TONE_CH_REPEATER_FREQ = ZVEI1_FREQS[ZVEI_TONE_CH_REPEATER]
 # ==========================
 ZVEI_TONE_CH_GROUP = "A"
 ZVEI_TONE_CH_GROUP_FREQ = ZVEI1_FREQS[ZVEI_TONE_CH_GROUP]
+
+# ==========================
+#  ZVEI PAUSE TONE DEFINITION
+# ==========================
+ZVEI_TONE_CH_PAUSE = "C"  # FIXME: Some references say "E"
+ZVEI_TONE_CH_EOM_FREQ = ZVEI1_FREQS[ZVEI_TONE_CH_PAUSE]

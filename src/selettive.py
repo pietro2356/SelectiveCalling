@@ -9,14 +9,18 @@ from protocolli.CCIR import (
     CCIR_VALUES,
     PCCIR_VALUES,
     PCCIR_SYMBOLS,
-    CCIR_CODE_LEN_MS
+    CCIR_CODE_LEN_MS,
+    CCIR_TONE_CH_PAUSE,
+    CCIR_TONE_CH_REPEATER
 )
 from protocolli.ZVEI import (
     ZVEI1_VALUES,
     ZVEI1_SYMBOLS,
     ZVEI2_VALUES,
     ZVEI2_SYMBOLS,
-    ZVEI_TONE_MS
+    ZVEI_TONE_MS,
+    ZVEI_TONE_CH_PAUSE,
+    ZVEI_TONE_CH_REPEATER
 )
 
 DEBUG_ENABLED = False
@@ -312,55 +316,81 @@ def decode(file,
 # -------------------------------
 #  FUNZIONE DI SPLIT HEX
 # -------------------------------
-def split_hex(hex_string, group_size, sep=False):
-    # normalizzazione e trimming del pattern
-    hex_string = hex_string.upper()
+def selective_formatter(selective_string, group_size, protocol="ZVEI", format="MINIMAL"):
+    # Pattern normalization and trimming
+    selective_string = selective_string.upper()
     pattern = "4E4E"
-    idx = hex_string.find(pattern)
+    idx = selective_string.find(pattern)
     if idx != -1:
-        hex_string = hex_string[:idx + len(pattern)]
+        selective_string = selective_string[:idx + len(pattern)]
 
-    hex_list = list(hex_string)
+    hex_list = list(selective_string)
+
+    # print(hex_list)
 
     # default group_size
     group_size = group_size if group_size is not None else 5
 
-    # costruisco una nuova lista dove:
-    # - una 'E' posta esattamente all'indice i == n * group_size (con n>0) viene rimossa (pausa)
-    # - le altre 'E' vengono sostituite con il carattere precedente (ripetizione)
+    # recupero il carattere di pausa dal protocollo
+    # char usati per indicare ripetizione (incluso 'C' per compatibilità)
+    pause_char = None
+    repeat_char = None
+
+    match protocol:
+        case "ZVEI":
+            pause_char = ZVEI_TONE_CH_PAUSE
+            repeat_char = ZVEI_TONE_CH_REPEATER
+        case "CCIR":
+            pause_char = CCIR_TONE_CH_PAUSE
+            repeat_char = CCIR_TONE_CH_REPEATER
+        case _:
+            pause_char = ""
+            repeat_char = "E"
+
+    debug_log("Using pause char:", pause_char, "and repeat char:", repeat_char)
+
     new_list = []
-    for i, ch in enumerate(hex_list):
-        if ch == 'E' or ch == 'C': # FIXME: Gestire anche 'C' se usato come ripetizione
-            if i != 0 and (i % group_size) == 0:
-                # pausa al confine: salto il carattere
+
+    for i, char in enumerate(hex_list):
+        debug_log("Processing char:", char, "at index:", i)
+        if char == repeat_char or char == pause_char:
+            # se il carattere di pausa specifico è esattamente al confine => pausa (skip)
+            if pause_char and char == pause_char and i != 0 and (i % group_size) == 0:
+                debug_log("Skipping pause char at index:", i)
                 continue
-            # ripetizione: uso l'ultimo carattere valido già inserito
+            # altrimenti è ripetizione: uso l'ultimo carattere valido già inserito
             if new_list:
+                debug_log("Repeating last valid char:", new_list[-1])
                 new_list.append(new_list[-1])
             else:
-                # fallback: se non ci sono precedenti uso il precedente dell'originale (se esiste)
                 prev = hex_list[i - 1] if i - 1 >= 0 else ''
+                debug_log("No previous valid char, using previous from original list:", prev)
                 new_list.append(prev)
         else:
-            new_list.append(ch)
+            debug_log("Adding char to new list:", char)
+            new_list.append(char)
 
     # suddivido in gruppi di group_size e formato output
     groups = [new_list[i:i + group_size] for i in range(0, len(new_list), group_size)]
 
-    sel_src = ""
-    sel_dest = ""
+    groups_str = ["".join(g) for g in groups]
 
-    for c in groups[0]:
-        sel_src += c + ""
+    if format == "MINIMAL":
+        return "-".join(groups_str)
+    else:
+        sel_src = ""
+        sel_dest = ""
 
-    for c in groups[1]:
-        sel_dest += c + ""
+        if len(groups) >= 1:
+            sel_src = "".join(groups[0])
+        if len(groups) >= 2:
+            sel_dest = "".join(groups[1])
 
-    debug_log("Source:", sel_src)
-    debug_log("Dest:", sel_dest)
-
-    groups_str = ["(" + "".join(g) + ")" for g in groups]
-    return "-".join(groups_str)
+        print("Protocol:", protocol)
+        print("Pause char:", pause_char)
+        print("Source:", sel_src, "(len=%d)" % len(sel_src))
+        print("Dest:", sel_dest, "(len=%d)" % len(sel_dest))
+        return "-".join(groups_str)
 
 
 # -------------------------------
@@ -388,6 +418,16 @@ if __name__ == "__main__":
         help="Protocol for selective decoding: CCIR-1, CCIR-2 (CCIR-7), PCCIR, ZVEI-1, ZVEI-2",
         required=True,
         choices=["CCIR-1", "CCIR-2", "CCIR-7", "PCCIR", "ZVEI-1", "ZVEI-2"],
+    )
+
+    parser.add_argument(
+        "-f",
+        "--format",
+        type=str,
+        default="MINIMAL",
+        help="Format for selective formatting: Only MINIMAL (default) or COMPLETE with pauses and repetitions",
+        required=True,
+        choices=["MINIMAL", "COMPLETE"],
     )
 
     parser.add_argument(
@@ -440,27 +480,29 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    print(args)
+
     if args.debug:
         DEBUG_ENABLED = True
 
     decoded, frames = decode(
         args.file,
-        tone_ms=args.tone_ms,
-        overlap=args.overlap,
+        tone_ms=args.tm,
+        overlap=args.o,
         noise_factor=args.noise_factor,
         plot=args.plot,
-        protocollo=args.cod
+        protocollo=args.p
     )
 
-    print("Decoded:", decoded)
-    print("Decoded:", split_hex(decoded, args.length_cod))
+    print("Original:", decoded)
+    print("Decoded:", selective_formatter(decoded, args.l, format=args.format))
 
 # OK: Aggiustare frequenza basate su Gazzetta Ufficiale
 # OK: Pulire codice
 #           - Pulire nomi parametri
 # TODO: Test Selettive registrate
 # TODO: Commentare codice in inglese
-# FIXME: Correggere funzione di sostituzione tono ripetitore in base a codifica
+# OK: Correggere funzione di sostituzione tono ripetitore in base a codifica
 # TODO: Blocchi GNURadio
 # TODO: Codifica
 

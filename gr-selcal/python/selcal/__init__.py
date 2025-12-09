@@ -20,4 +20,5 @@ except ModuleNotFoundError:
     pass
 
 # import any pure python here
+from .selcall_decoder import selcall_decoder
 #

@@ -15,10 +15,13 @@ import os
 # import pybind11 generated symbols into the selcal namespace
 try:
     # this might fail if the module is python-only
-    from .selcal_python import *
+    from .selcal_decoder import *
 except ModuleNotFoundError:
     pass
 
 # import any pure python here
-from .selcall_decoder import selcall_decoder
-#
+from .selcal_decoder import selcal_decoder
+
+# Make it available for import
+__all__ = ['selcal_decoder']
+

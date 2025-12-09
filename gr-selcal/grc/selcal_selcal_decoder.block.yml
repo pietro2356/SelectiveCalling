@@ -1,0 +1,69 @@
+id: selcal_selcall_decoder
+label: Selcall Decoder
+category: '[selcal]'
+
+templates:
+  imports: from gnuradio import selcal
+  make: >
+    selcal.selcal_decoder(
+        sample_rate=${sample_rate},
+        protocol=${protocol},
+        target_code=${target_code},
+        code_length=${code_length},
+        tone_duration_ms=${tone_duration_ms},
+        debug=${debug}
+    )
+
+
+parameters:
+- id: protocol
+  label: Protocol
+  dtype: string
+  default: 'ZVEI-1'
+  options: ['ZVEI-1', 'ZVEI-2', 'CCIR-1', 'CCIR-2', 'PCCIR']
+  option_labels: ['ZVEI-1', 'ZVEI-2', 'CCIR-1', 'CCIR-2', 'PCCIR']
+
+- id: target_code
+  label: Target Code
+  dtype: string
+  default: '50101'
+
+- id: code_length
+  label: Code Length
+  dtype: int
+  default: 5
+
+- id: tone_duration_ms
+  label: Tone Duration (ms)
+  dtype: float
+  default: 0.0
+  hide: part
+
+- id: sample_rate
+  label: Sample Rate
+  dtype: int
+  default: samp_rate
+
+- id: debug
+  label: Debug Mode
+  dtype: bool
+  default: False
+  options: [True, False]
+  option_labels: ['Enabled', 'Disabled']
+
+# Input e Output del blocco
+inputs:
+- label: audio_in
+  domain: stream
+  dtype: float
+
+outputs:
+- label: audio_out
+  domain: stream
+  dtype: float
+
+- label: selcall_out
+  domain: message
+  id: selcall_out
+
+file_format: 1

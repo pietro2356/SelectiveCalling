@@ -6,8 +6,6 @@ import numpy as np
 from gnuradio import gr
 import pmt
 import time
-from scipy.signal import butter, lfilter, lfilter_zi
-from collections import deque
 
 # Importiamo la logica esistente (assumendo che i file siano nella stessa cartella o nel path)
 # Se usati in un modulo OOT standard, l'import potrebbe variare (es: from my_module import ...)
@@ -78,14 +76,6 @@ class selcal_decoder(gr.sync_block):
         self.gate_timer_samples = 0
         self.gate_duration_samples = int(20.0 * self.fs)  # 20 secondi
 
-        # --- DSP Buffer & Filtering ---
-        # Filtro passa banda (700-2500Hz)
-        nyq = 0.5 * self.fs
-        b, a = butter(4, [700.0 / nyq, 2500.0 / nyq], btype='band')
-        self.b, self.a = b, a
-        # Stato del filtro per continuità tra chunk (Initial condition)
-        self.zi = lfilter_zi(b, a)
-
         # Buffer per l'analisi Goertzel
         # La finestra di analisi deve essere grande circa quanto un tono
         self.samples_per_tone = int(self.fs * (self.tone_ms / 1000.0))
@@ -142,13 +132,10 @@ class selcal_decoder(gr.sync_block):
         out0 = output_items[0]
         n_samples = len(in0)
 
-        # --- 1. Filtraggio Audio (Bandpass) ---
-        # Usiamo lfilter con stato (zi) per continuità real-time
-        filtered_chunk, self.zi = lfilter(self.b, self.a, in0, zi=self.zi)
-
-        # --- 2. Analisi e Decodifica (Detection) ---
-        # Accodiamo i nuovi dati al buffer interno
-        self.internal_buffer = np.concatenate((self.internal_buffer, filtered_chunk))
+        # 1. Accumulo Dati (No Filtering Interno)
+        # Assumiamo in0 già filtrato dal blocco Bandpass Filter (C++) precedente
+        # Concateniamo direttamente l'input grezzo (che ora è già filtrato)
+        self.internal_buffer = np.concatenate((self.internal_buffer, in0))
 
         # Processiamo finché abbiamo abbastanza dati per una finestra
         while len(self.internal_buffer) >= self.samples_per_tone:

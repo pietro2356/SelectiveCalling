@@ -60,6 +60,12 @@ class selcal_decoder(gr.sync_block):
         self.user_tone_ms = tone_duration_ms
         self.debug_mode = debug
 
+        # --- OTTIMIZZAZIONE: Decimazione ---
+        # Analizziamo l'audio a 8kHz invece che 48kHz.
+        # Fattore 6: 48000 / 6 = 8000 Hz.
+        self.decim_factor = 6
+        self.fs_analysis = self.fs / self.decim_factor
+
         # --- Setup Logica Selettiva ---
         self.decoder_lib = SelectiveCalling(debug=debug)
         self.freq_list = []
@@ -139,12 +145,17 @@ class selcal_decoder(gr.sync_block):
 
         # Processiamo finché abbiamo abbastanza dati per una finestra
         while len(self.internal_buffer) >= self.samples_per_tone:
-            # Estrai finestra
-            frame = self.internal_buffer[:self.samples_per_tone]
+            # Estrai finestra a piena risoluzione (48k)
+            frame_48k = self.internal_buffer[:self.samples_per_tone]
+
+            # --- OTTIMIZZAZIONE QUI ---
+            # Creiamo una versione "leggera" per l'analisi: prendiamo 1 campione ogni 6
+            frame_analysis = frame_48k[::self.decim_factor]
 
             # Esegui Goertzel (riutilizzando la logica della classe SelectiveCalling)
             symbol, max_p, second_p, idx = self.decoder_lib.detect_symbol_for_frame(
-                frame, self.fs,
+                frame_analysis,
+                self.fs_analysis,
                 freq_list=self.freq_list,
                 symbol_list=self.symbol_list,
                 band=8,
@@ -165,7 +176,7 @@ class selcal_decoder(gr.sync_block):
             # Aggiungi alla storia dei simboli rilevati
             self._process_symbol_stream(valid_symbol, max_p)
 
-            # Shift del buffer (Hop)
+            # Shift del buffer (rimane basato sui campioni reali a 48k)
             self.internal_buffer = self.internal_buffer[self.hop_size:]
 
         # --- 3. Gestione Audio Gate ---

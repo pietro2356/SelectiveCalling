@@ -40,7 +40,7 @@ class SelectiveCalling:
     #  GOERTZEL
     # -------------------------------
     @staticmethod
-    def goertzel(samples: np.ndarray, sample_rate: int, freq: float) -> float:
+    def goertzel(samples: np.ndarray, sample_rate: float, freq: float) -> float:
         n = len(samples)
         if n == 0:
             return 0.0
@@ -57,7 +57,7 @@ class SelectiveCalling:
         return float(np.abs(power))
 
     @classmethod
-    def goertzel_band(cls, samples: np.ndarray, center_freq: float, fs: int, band=8, steps=5) -> float:
+    def goertzel_band(cls, samples: np.ndarray, center_freq: float, fs: float, band=8, steps=5) -> float:
         freqs = np.linspace(center_freq - band, center_freq + band, steps)
         powers = [cls.goertzel(samples, fs, f) for f in freqs]
         return max(powers)
@@ -65,7 +65,7 @@ class SelectiveCalling:
     # -------------------------------
     #  SYMBOL DETECTION
     # -------------------------------
-    def detect_symbol_for_frame(self, frame: np.ndarray, fs: int,
+    def detect_symbol_for_frame(self, frame: np.ndarray, fs: float,
                                 freq_list: List[float],
                                 symbol_list: List[str],
                                 band=8,

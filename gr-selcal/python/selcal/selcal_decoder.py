@@ -7,8 +7,8 @@ from gnuradio import gr
 import pmt
 import time
 
-# Importiamo la logica esistente (assumendo che i file siano nella stessa cartella o nel path)
-# Se usati in un modulo OOT standard, l'import potrebbe variare (es: from my_module import ...)
+# Import logic from the provided library files
+# Note: In a standard OOT module, imports might look like 'from my_module import ...'
 from .SelectiveCalling import SelectiveCalling
 from .protocolli.CCIR import (
     CCIR_VALUES,
@@ -32,8 +32,8 @@ from .protocolli.ZVEI import (
 
 class selcal_decoder(gr.sync_block):
     """
-    SelCall Decoder Block per GNU Radio.
-    Decodifica CCIR/ZVEI in tempo reale e controlla un gate audio.
+    SelCall Decoder Block for GNU Radio.
+    Decodes CCIR/ZVEI protocols in real-time and controls an audio gate.
     """
 
     def __init__(self,
@@ -44,7 +44,8 @@ class selcal_decoder(gr.sync_block):
                  tone_duration_ms=0.0,
                  debug=False):
 
-        # Inizializzazione blocco: 1 input float, 1 output float
+        # [A] Block Initialization
+        # Standard GNU Radio Sync Block init (1:1 input/output ratio)
         gr.sync_block.__init__(
             self,
             name='SelCall Decoder',
@@ -52,7 +53,7 @@ class selcal_decoder(gr.sync_block):
             out_sig=[np.float32]
         )
 
-        # --- Parametri Utente ---
+        # --- User Parameters ---
         self.fs = sample_rate
         self.protocol = protocol
         self.target_code = target_code
@@ -60,13 +61,14 @@ class selcal_decoder(gr.sync_block):
         self.user_tone_ms = tone_duration_ms
         self.debug_mode = debug
 
-        # --- OTTIMIZZAZIONE: Decimazione ---
-        # Analizziamo l'audio a 8kHz invece che 48kHz.
-        # Fattore 6: 48000 / 6 = 8000 Hz.
+        # [A] Optimization: Decimation Strategy
+        # We analyze audio at 8kHz instead of 48kHz to reduce Goertzel CPU load.
+        # Factor 6: 48000 / 6 = 8000 Hz.
+        # NOTE: Requires an external Bandpass Filter (300-3800Hz) upstream to prevent aliasing.
         self.decim_factor = 6
         self.fs_analysis = self.fs / self.decim_factor
 
-        # --- Setup Logica Selettiva ---
+        # --- SelCall Logic Setup ---
         self.decoder_lib = SelectiveCalling(debug=debug)
         self.freq_list = []
         self.symbol_list = []
@@ -80,29 +82,27 @@ class selcal_decoder(gr.sync_block):
         # --- Audio Gate State ---
         self.gate_open = False
         self.gate_timer_samples = 0
-        self.gate_duration_samples = int(20.0 * self.fs)  # 20 secondi
+        self.gate_duration_samples = int(20.0 * self.fs)  # Duration: 20 seconds
 
-        # Buffer per l'analisi Goertzel
-        # La finestra di analisi deve essere grande circa quanto un tono
+        # [A] Buffer Sizing
+        # The analysis window must roughly match the tone duration
         self.samples_per_tone = int(self.fs * (self.tone_ms / 1000.0))
-        # Hop size: ogni quanto facciamo l'analisi (es. 50% overlap)
+        # Hop size: how much we slide the window (e.g., 50% overlap)
         self.hop_size = max(1, self.samples_per_tone // 2)
 
-        # Buffer interno per accumulare i campioni
+        # Internal buffer to accumulate samples across work() calls
         self.internal_buffer = np.array([], dtype=np.float32)
 
-        # --- State Machine Decodifica ---
-        self.detected_symbols_history = []  # Lista di (simbolo, potenza)
+        # --- Decoding State Machine ---
+        self.detected_symbols_history = []  # Temporary list of (symbol, power)
         self.last_valid_sequence = ""
-
-        # Soglia rumore adattiva (Running Average)
-        self.avg_noise_power = 10.0  # Valore iniziale arbitrario
+        self.avg_noise_power = 10.0  # Initial noise floor estimate
 
         if self.debug_mode:
             print(f"[SelCall] Init: Protocol={protocol}, Tone={self.tone_ms}ms, Gate={self.target_code}")
 
     def _configure_protocol(self):
-        """ Configura le tabelle di frequenza in base al protocollo scelto """
+        """ Configures frequency tables based on the selected protocol """
         p = self.protocol.upper()
 
         if p == "ZVEI-1":
@@ -127,7 +127,7 @@ class selcal_decoder(gr.sync_block):
             self.symbol_list = ZVEI1_SYMBOLS
             base_ms = 70
 
-        # Override se l'utente ha specificato una durata custom (>0)
+        # Override if user specified a custom duration (>0)
         if self.user_tone_ms > 0:
             self.tone_ms = self.user_tone_ms
         else:
@@ -138,94 +138,98 @@ class selcal_decoder(gr.sync_block):
         out0 = output_items[0]
         n_samples = len(in0)
 
-        # 1. Accumulo Dati (No Filtering Interno)
-        # Assumiamo in0 già filtrato dal blocco Bandpass Filter (C++) precedente
-        # Concateniamo direttamente l'input grezzo (che ora è già filtrato)
+        # [B] Data Accumulation
+        # Append incoming samples to the internal buffer.
+        # We assume in0 is already filtered by an upstream Bandpass Filter.
         self.internal_buffer = np.concatenate((self.internal_buffer, in0))
 
-        # Processiamo finché abbiamo abbastanza dati per una finestra
+        # [C] Analysis Loop
+        # Process as long as we have enough data for a full tone window
         while len(self.internal_buffer) >= self.samples_per_tone:
-            # Estrai finestra a piena risoluzione (48k)
+
+            # Extract window at full resolution (e.g., 48kHz)
             frame_48k = self.internal_buffer[:self.samples_per_tone]
 
-            # --- OTTIMIZZAZIONE QUI ---
-            # Creiamo una versione "leggera" per l'analisi: prendiamo 1 campione ogni 6
+            # [D] Decimation (Downsampling)
+            # Create a "lightweight" version for Goertzel analysis: take 1 sample every 6.
             frame_analysis = frame_48k[::self.decim_factor]
 
-            # Esegui Goertzel (riutilizzando la logica della classe SelectiveCalling)
+            # [E] DSP Analysis (Goertzel)
+            # Call the library using the reduced sample rate (fs_analysis)
             symbol, max_p, second_p, idx = self.decoder_lib.detect_symbol_for_frame(
                 frame_analysis,
                 self.fs_analysis,
                 freq_list=self.freq_list,
                 symbol_list=self.symbol_list,
                 band=8,
-                ratio_threshold=2.5  # Leggermente più basso per real-time
+                ratio_threshold=2.5  # Slightly lower threshold for real-time
             )
 
-            # Aggiornamento soglia rumore (filtro esponenziale lento)
-            # Se la potenza è bassa, probabilmente è rumore
+            # [F] Adaptive Noise Thresholding
+            # Exponential moving average to estimate noise floor
             if max_p < (self.avg_noise_power * 20):
                 self.avg_noise_power = 0.95 * self.avg_noise_power + 0.05 * max_p
 
-            adaptive_thresh = self.avg_noise_power * 8.0  # Soglia attivazione
+            adaptive_thresh = self.avg_noise_power * 8.0
 
             valid_symbol = "-"
-            if max_p > adaptive_thresh and max_p > 100.0:  # Hard floor minimo
+            if max_p > adaptive_thresh and max_p > 100.0:  # Hard floor check
                 valid_symbol = symbol
 
-            # Aggiungi alla storia dei simboli rilevati
+            # [G] Symbol Stream Processing
+            # Pass the detected symbol to the State Machine
             self._process_symbol_stream(valid_symbol, max_p)
 
-            # Shift del buffer (rimane basato sui campioni reali a 48k)
+            # [H] Buffer Sliding (Hop)
+            # Advance the buffer for the next analysis window
             self.internal_buffer = self.internal_buffer[self.hop_size:]
 
-        # --- 3. Gestione Audio Gate ---
+        # [M] Audio Gate / Pass-through Logic
+        # Decide whether to mute or pass audio based on the timer
         if self.gate_open:
             if self.gate_timer_samples > 0:
-                # Copia input in output
+                # Copy input to output (Pass-through)
                 out0[:] = in0[:]
                 self.gate_timer_samples -= n_samples
             else:
-                # Tempo scaduto
+                # Timer expired -> Mute
                 self.gate_open = False
-                out0[:] = 0.0  # Mute
+                out0[:] = 0.0
                 if self.debug_mode:
-                    print("[SelCall] Gate chiuso (timeout).")
+                    print("[SelCall] Gate closed (timeout).")
         else:
-            # Mute
+            # Default Mute
             out0[:] = 0.0
 
         return n_samples
 
     def _process_symbol_stream(self, symbol, power):
-        """ 
-        Logica per ricostruire la stringa dai simboli grezzi (debouncing)
-        e verificare il target code.
         """
-        # Aggiungiamo il simbolo raw alla lista temporanea
+        [G] State Machine: Reconstructs the string from raw symbols (Debouncing)
+        and checks for sequence completion.
+        """
         self.detected_symbols_history.append(symbol)
 
-        # Manteniamo la lista corta (es. ultimi 50 frame) per non saturare memoria
+        # Keep history short to save memory
         if len(self.detected_symbols_history) > 100:
             self.detected_symbols_history.pop(0)
 
-        # Logica semplificata di "End of Sequence":
-        # Se riceviamo silenzio ("-") per un po', proviamo a parsare ciò che abbiamo accumulato.
-        # Oppure se il buffer è pieno.
-
-        # Controlliamo se gli ultimi N simboli sono silenzio -> fine trasmissione probabile
+        # [I] End-of-Sequence Detection
+        # If we detect silence ("-") for a few frames after data, assume transmission ended.
         suffix_len = 4
         if len(self.detected_symbols_history) > suffix_len:
             last_n = self.detected_symbols_history[-suffix_len:]
+
+            # If the last N symbols are all silence
             if all(s == "-" for s in last_n):
-                # Tentativo di estrazione stringa
+                # Extract non-silence symbols
                 raw_seq = [s for s in self.detected_symbols_history if s != "-"]
 
                 if not raw_seq:
-                    return  # Niente da processare
+                    return # Nothing to process
 
-                # Compressione (Run Length Encoding implicito)
-                # Uniamo simboli uguali adiacenti
+                # [J] Compression (RLE - Run Length Encoding logic)
+                # Merge adjacent identical symbols (e.g., 1, 1, 1 -> 1)
                 compressed = []
                 if raw_seq:
                     prev = raw_seq[0]
@@ -237,23 +241,22 @@ class selcal_decoder(gr.sync_block):
 
                 final_str = "".join(compressed)
 
-                # Filtro lunghezza minima (es. almeno 3 caratteri per essere una selettiva valida)
+                # [K] Sequence Validation & Formatting
+                # Filter noise (min length 3) and avoid reprocessing the same sequence
                 if len(final_str) >= 3:
-                    # Evita di riprocessare la stessa stringa identica consecutiva troppe volte
                     if final_str != self.last_valid_sequence:
                         self.last_valid_sequence = final_str
                         self._analyze_sequence(final_str)
 
-                        # Reset history dopo un match/process valido
+                        # Reset history after valid processing
                         self.detected_symbols_history = []
 
     def _analyze_sequence(self, decoded_string):
-        """ 
-        Analizza la stringa compressa, applica la logica del formatter 
-        e decide se aprire il gate.
         """
-        # Usa il formatter della libreria per gestire ripetizioni (E) e pause
-        # Nota: selective_formatter ritorna stringa formattata (es. 12345-50101)
+        [K] Analyzes the compressed string, applies protocol logic,
+        and checks against the Target Code.
+        """
+        # Apply protocol formatter (Handle 'E' repeats, pauses, etc.)
         formatted_str = self.decoder_lib.selective_formatter(
             decoded_string,
             group_size=self.code_length,
@@ -261,38 +264,35 @@ class selcal_decoder(gr.sync_block):
             format_output="MINIMAL"
         )
 
-        # Rimuoviamo il separatore "-" per il controllo semplice
         clean_str = formatted_str.replace("-", "")
         target = self.target_code.upper()
 
         match_found = False
 
-        # Logica di Match:
-        # La selettiva è tipicamente SRC + DEST + EOS.
-        # Controlliamo se il TARGET è presente nella stringa decodificata
+        # [L] Target Matching Logic
+        # Check if Target is inside the decoded string (Source or Dest)
         if target in clean_str:
             match_found = True
             self.gate_open = True
-            self.gate_timer_samples = self.gate_duration_samples  # Reset timer (Retrigger)
+            self.gate_timer_samples = self.gate_duration_samples  # Reset/Retrigger Timer
             if self.debug_mode:
-                print(f"[SelCall] MATCH! Target {target} trovato in {clean_str}. Gate APERTO.")
+                print(f"[SelCall] MATCH! Target {target} found in {clean_str}. Gate OPEN.")
 
-        # Invio Messaggio PMT
+        # [N] Message Emission
         self._send_message(formatted_str, match_found)
 
     def _send_message(self, decoded_code, match_status):
-        """ Invia un messaggio asincrono sulla porta 'measurements' """
+        """ [N] PMT Message Construction & Publishing """
         timestamp = time.time()
 
-        # Costruzione dizionario metadati
+        # Build Metadata Dictionary
         meta = pmt.make_dict()
         meta = pmt.dict_add(meta, pmt.intern("timestamp"), pmt.from_double(timestamp))
         meta = pmt.dict_add(meta, pmt.intern("protocol"), pmt.intern(self.protocol))
         meta = pmt.dict_add(meta, pmt.intern("gate_active"), pmt.from_bool(match_status))
         meta = pmt.dict_add(meta, pmt.intern("code"), pmt.intern(decoded_code))
 
-        # PMT Pair: (Code_String, Metadata_Dict) o viceversa, standard GNU Radio è spesso un cons
-        # Qui inviamo una coppia (stringa_codice, metadati)
-        msg = pmt.cons(pmt.intern(decoded_code), meta)
+        # Create Pair: (Code_String, Metadata_Dict)
+        msg = pmt.cons(pmt.intern("sel"), meta)
 
         self.message_port_pub(self.message_port_name, msg)

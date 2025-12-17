@@ -16,7 +16,6 @@ from PyQt5.QtCore import QObject, pyqtSlot
 from gnuradio import analog
 from gnuradio import audio
 from gnuradio import blocks, gr
-from gnuradio import bomboklat
 from gnuradio import filter
 from gnuradio.filter import firdes
 from gnuradio import gr
@@ -35,7 +34,7 @@ import threading
 
 
 
-class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
+class SelectiveFlowGraphUHD(gr.top_block, Qt.QWidget):
 
     def __init__(self):
         gr.top_block.__init__(self, "Not titled yet", catch_exceptions=True)
@@ -58,7 +57,7 @@ class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
         self.top_grid_layout = Qt.QGridLayout()
         self.top_layout.addLayout(self.top_grid_layout)
 
-        self.settings = Qt.QSettings("gnuradio/flowgraphs", "SelectiveFlowGraphSDR")
+        self.settings = Qt.QSettings("gnuradio/flowgraphs", "SelectiveFlowGraphUHD")
 
         try:
             geometry = self.settings.value("geometry")
@@ -74,7 +73,8 @@ class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
         self.volume = volume = 1
         self.transition = transition = 1e6
         self.squelch = squelch = -50
-        self.samp_rate = samp_rate = 2e6
+        self.samp_rate_0 = samp_rate_0 = 2e6
+        self.samp_rate = samp_rate = 32000
         self.quadrature = quadrature = 500000
         self.freq_ch = freq_ch = 161812500
         self.freq = freq = 161812500
@@ -86,9 +86,6 @@ class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
         # Blocks
         ##################################################
 
-        self._volume_range = qtgui.Range(0.1, 2, 0.1, 1, 200)
-        self._volume_win = qtgui.RangeWidget(self._volume_range, self.set_volume, "Volume", "counter_slider", float, QtCore.Qt.Horizontal)
-        self.top_layout.addWidget(self._volume_win)
         self._squelch_range = qtgui.Range(-150, 20, 1, -50, 200)
         self._squelch_win = qtgui.RangeWidget(self._squelch_range, self.set_squelch, "squelch", "counter_slider", float, QtCore.Qt.Horizontal)
         self.top_layout.addWidget(self._squelch_win)
@@ -124,6 +121,9 @@ class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
             lambda i: self.set_band(self._band_options[i]))
         # Create the radio buttons
         self.top_layout.addWidget(self._band_tool_bar)
+        self._volume_range = qtgui.Range(0.1, 2, 0.1, 1, 200)
+        self._volume_win = qtgui.RangeWidget(self._volume_range, self.set_volume, "Volume", "counter_slider", float, QtCore.Qt.Horizontal)
+        self.top_layout.addWidget(self._volume_win)
         self.uhd_usrp_source_0 = uhd.usrp_source(
             ",".join(("", '')),
             uhd.stream_args(
@@ -242,7 +242,6 @@ class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
                 transition,
                 window.WIN_HAMMING,
                 6.76))
-        self.bomboklat_mimibombo_0 = bomboklat.mimibombo(gain=volume)
         self.blocks_message_debug_0 = blocks.message_debug(True, gr.log_levels.info)
         self.band_pass_filter_0 = filter.fir_filter_fff(
             1,
@@ -272,19 +271,18 @@ class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
         self.connect((self.analog_nbfm_rx_0, 0), (self.rational_resampler_xxx_0_0_0, 0))
         self.connect((self.analog_pwr_squelch_xx_0, 0), (self.analog_nbfm_rx_0, 0))
         self.connect((self.band_pass_filter_0, 0), (self.selcal_selcall_decoder_0, 0))
-        self.connect((self.bomboklat_mimibombo_0, 0), (self.audio_sink_0, 0))
         self.connect((self.low_pass_filter_0, 0), (self.analog_pwr_squelch_xx_0, 0))
         self.connect((self.rational_resampler_xxx_0_0, 0), (self.low_pass_filter_0, 0))
         self.connect((self.rational_resampler_xxx_0_0_0, 0), (self.audio_sink_0_0, 0))
         self.connect((self.rational_resampler_xxx_0_0_0, 0), (self.band_pass_filter_0, 0))
-        self.connect((self.selcal_selcall_decoder_0, 0), (self.bomboklat_mimibombo_0, 0))
+        self.connect((self.selcal_selcall_decoder_0, 0), (self.audio_sink_0, 0))
         self.connect((self.uhd_usrp_source_0, 0), (self.qtgui_freq_sink_x_0, 0))
         self.connect((self.uhd_usrp_source_0, 0), (self.qtgui_waterfall_sink_x_0, 0))
         self.connect((self.uhd_usrp_source_0, 0), (self.rational_resampler_xxx_0_0, 0))
 
 
     def closeEvent(self, event):
-        self.settings = Qt.QSettings("gnuradio/flowgraphs", "SelectiveFlowGraphSDR")
+        self.settings = Qt.QSettings("gnuradio/flowgraphs", "SelectiveFlowGraphUHD")
         self.settings.setValue("geometry", self.saveGeometry())
         self.stop()
         self.wait()
@@ -311,13 +309,19 @@ class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
         self.squelch = squelch
         self.analog_pwr_squelch_xx_0.set_threshold(self.squelch)
 
+    def get_samp_rate_0(self):
+        return self.samp_rate_0
+
+    def set_samp_rate_0(self, samp_rate_0):
+        self.samp_rate_0 = samp_rate_0
+
     def get_samp_rate(self):
         return self.samp_rate
 
     def set_samp_rate(self, samp_rate):
         self.samp_rate = samp_rate
-        self.low_pass_filter_0.set_taps(firdes.low_pass(1, self.samp_rate, self.cutoff, self.transition, window.WIN_HAMMING, 6.76))
         self.uhd_usrp_source_0.set_samp_rate(self.samp_rate)
+        self.low_pass_filter_0.set_taps(firdes.low_pass(1, self.samp_rate, self.cutoff, self.transition, window.WIN_HAMMING, 6.76))
 
     def get_quadrature(self):
         return self.quadrature
@@ -331,8 +335,8 @@ class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
     def set_freq_ch(self, freq_ch):
         self.freq_ch = freq_ch
         self._freq_ch_callback(self.freq_ch)
-        self.qtgui_freq_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
         self.qtgui_waterfall_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
+        self.qtgui_freq_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
 
     def get_freq(self):
         return self.freq
@@ -353,22 +357,22 @@ class SelectiveFlowGraphSDR(gr.top_block, Qt.QWidget):
 
     def set_band(self, band):
         self.band = band
-        self._band_callback(self.band)
         self.analog_nbfm_rx_0.set_max_deviation(self.band)
+        self._band_callback(self.band)
 
     def get_audio_samp_rate(self):
         return self.audio_samp_rate
 
     def set_audio_samp_rate(self, audio_samp_rate):
         self.audio_samp_rate = audio_samp_rate
-        self.band_pass_filter_0.set_taps(firdes.band_pass(1, self.audio_samp_rate, 300, 38e2, 200, window.WIN_HAMMING, 6.76))
-        self.qtgui_freq_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
         self.qtgui_waterfall_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
+        self.qtgui_freq_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
+        self.band_pass_filter_0.set_taps(firdes.band_pass(1, self.audio_samp_rate, 300, 38e2, 200, window.WIN_HAMMING, 6.76))
 
 
 
 
-def main(top_block_cls=SelectiveFlowGraphSDR, options=None):
+def main(top_block_cls=SelectiveFlowGraphUHD, options=None):
 
     qapp = Qt.QApplication(sys.argv)
 

@@ -74,12 +74,13 @@ class SelectiveFlowGraphUHD(gr.top_block, Qt.QWidget):
         self.transition = transition = 1e6
         self.squelch = squelch = -50
         self.samp_rate_0 = samp_rate_0 = 2e6
-        self.samp_rate = samp_rate = 32000
+        self.samp_rate = samp_rate = 2e6
+        self.rx_gain = rx_gain = 0.5
         self.quadrature = quadrature = 500000
-        self.freq_ch = freq_ch = 161812500
+        self.freq_ch = freq_ch = 446043750
         self.freq = freq = 161812500
         self.cutoff = cutoff = 10e3
-        self.band = band = int(25e2)
+        self.band = band = int(5e2)
         self.audio_samp_rate = audio_samp_rate = 48000
 
         ##################################################
@@ -89,6 +90,9 @@ class SelectiveFlowGraphUHD(gr.top_block, Qt.QWidget):
         self._squelch_range = qtgui.Range(-150, 20, 1, -50, 200)
         self._squelch_win = qtgui.RangeWidget(self._squelch_range, self.set_squelch, "squelch", "counter_slider", float, QtCore.Qt.Horizontal)
         self.top_layout.addWidget(self._squelch_win)
+        self._rx_gain_range = qtgui.Range(0, 1, 0.1, 0.5, 200)
+        self._rx_gain_win = qtgui.RangeWidget(self._rx_gain_range, self.set_rx_gain, "Gain", "counter_slider", float, QtCore.Qt.Horizontal)
+        self.top_layout.addWidget(self._rx_gain_win)
         # Create the options list
         self._freq_ch_options = [161812500, 161862500, 446043750, 99300000]
         # Create the labels list
@@ -135,13 +139,14 @@ class SelectiveFlowGraphUHD(gr.top_block, Qt.QWidget):
         self.uhd_usrp_source_0.set_samp_rate(samp_rate)
         self.uhd_usrp_source_0.set_time_unknown_pps(uhd.time_spec(0))
 
-        self.uhd_usrp_source_0.set_center_freq(freq, 0)
+        self.uhd_usrp_source_0.set_center_freq(freq_ch, 0)
         self.uhd_usrp_source_0.set_antenna("RX2", 0)
-        self.uhd_usrp_source_0.set_gain(0, 0)
+        self.uhd_usrp_source_0.set_bandwidth(band, 0)
+        self.uhd_usrp_source_0.set_normalized_gain(rx_gain, 0)
         self.selcal_selcall_decoder_0 = selcal.selcal_decoder(
             sample_rate=audio_samp_rate,
             protocol='CCIR-1',
-            target_code='11501',
+            target_code='85564',
             code_length=5,
             tone_duration_ms=0.0,
             debug=False
@@ -320,8 +325,15 @@ class SelectiveFlowGraphUHD(gr.top_block, Qt.QWidget):
 
     def set_samp_rate(self, samp_rate):
         self.samp_rate = samp_rate
-        self.uhd_usrp_source_0.set_samp_rate(self.samp_rate)
         self.low_pass_filter_0.set_taps(firdes.low_pass(1, self.samp_rate, self.cutoff, self.transition, window.WIN_HAMMING, 6.76))
+        self.uhd_usrp_source_0.set_samp_rate(self.samp_rate)
+
+    def get_rx_gain(self):
+        return self.rx_gain
+
+    def set_rx_gain(self, rx_gain):
+        self.rx_gain = rx_gain
+        self.uhd_usrp_source_0.set_normalized_gain(self.rx_gain, 0)
 
     def get_quadrature(self):
         return self.quadrature
@@ -335,15 +347,15 @@ class SelectiveFlowGraphUHD(gr.top_block, Qt.QWidget):
     def set_freq_ch(self, freq_ch):
         self.freq_ch = freq_ch
         self._freq_ch_callback(self.freq_ch)
-        self.qtgui_waterfall_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
         self.qtgui_freq_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
+        self.qtgui_waterfall_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
+        self.uhd_usrp_source_0.set_center_freq(self.freq_ch, 0)
 
     def get_freq(self):
         return self.freq
 
     def set_freq(self, freq):
         self.freq = freq
-        self.uhd_usrp_source_0.set_center_freq(self.freq, 0)
 
     def get_cutoff(self):
         return self.cutoff
@@ -357,17 +369,18 @@ class SelectiveFlowGraphUHD(gr.top_block, Qt.QWidget):
 
     def set_band(self, band):
         self.band = band
-        self.analog_nbfm_rx_0.set_max_deviation(self.band)
         self._band_callback(self.band)
+        self.analog_nbfm_rx_0.set_max_deviation(self.band)
+        self.uhd_usrp_source_0.set_bandwidth(self.band, 0)
 
     def get_audio_samp_rate(self):
         return self.audio_samp_rate
 
     def set_audio_samp_rate(self, audio_samp_rate):
         self.audio_samp_rate = audio_samp_rate
-        self.qtgui_waterfall_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
-        self.qtgui_freq_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
         self.band_pass_filter_0.set_taps(firdes.band_pass(1, self.audio_samp_rate, 300, 38e2, 200, window.WIN_HAMMING, 6.76))
+        self.qtgui_freq_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
+        self.qtgui_waterfall_sink_x_0.set_frequency_range(self.freq_ch, self.audio_samp_rate)
 
 
 
